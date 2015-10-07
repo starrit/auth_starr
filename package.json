@@ -1,6 +1,6 @@
 {
   "name": "@starrit/auth_starr",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "index.js",
   "dependencies": {
     "bcrypt": "^0.8.5",
