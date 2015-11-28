@@ -73,9 +73,30 @@ var AuthService =  function(logger) {
      */
     this.authenticateClient = function(user, password, client_id, client_secret) {
         return this.mongo.validateUser(user, password)
-            .then(this.mongo.validateClient(client_id, client_secret))
-            .then(this.mongo.addToken(user, password, this.createToken()));
+            .then(function() {return this.mongo.validateClient(client_id, client_secret)}.bind(this))
+            .then(function() {return this.mongo.addToken(user, client_id, this.createToken())}.bind(this))
     };
+
+    /**
+     * Validate user for base application.
+     * @param user username in base application.
+     * @param password password in base application.
+     * @returns {*}
+     */
+    this.validateUser = function(user, password) {
+        return this.mongo.validateUser(user, password);
+    };
+
+    /**
+     * Returns token for client - only occurs if token already exists in datastore,
+     * meaning user has authenticated client for use.
+     * @param user base application username.
+     * @param client client requesting token.
+     */
+    this.getToken = function(user, client) {
+        return this.mongo.getToken(user, client);
+    }
+
 
     /**
      * Creates a random token;

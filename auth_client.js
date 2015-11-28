@@ -1,4 +1,3 @@
-
 /**
  * Auth-Starr Client.
  * Implementation of a Client.
@@ -10,7 +9,7 @@ var AuthClient =  function(logger, server) {
     this.logger = logger;
     this.server = server;
     this.CLIENT_ID = 'baseID';
-    this.CLIENT_SECRET = 'clientSecret';
+    this.CLIENT_SECRET = 'baseSecret';
 
     /**
      * Registers a user with our base client and authenticates it.
@@ -19,7 +18,9 @@ var AuthClient =  function(logger, server) {
      */
     this.registerUser = function(user, password) {
         return this.server.registerUser(user, password)
-            .then(this.server.authenticateClient(user, password, this.CLIENT_ID, this.CLIENT_SECRET));
+            .then(function(success) {
+                return this.server.authenticateClient(user, password, this.CLIENT_ID, this.CLIENT_SECRET)
+            }.bind(this));
     };
 
     /**
@@ -30,8 +31,10 @@ var AuthClient =  function(logger, server) {
      * Validates user name/password in client_users and returns stored auth token from client_tokens.
      */
     this.login = function(user, password) {
-        return this.baseStore.validateUser(user, password)
-            .then(this.baseStore.getToken(user, this.CLIENT_ID));
+        return this.server.validateUser(user, password)
+            .then(function(success) {
+                return this.server.getToken(user, this.CLIENT_ID)
+            }.bind(this));
     };
 
 };
