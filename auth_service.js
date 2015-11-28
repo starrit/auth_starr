@@ -19,9 +19,19 @@ var AuthService =  function(logger) {
      *
      * Checks the user_tokens collection to ensure token is valid.
      */
-    this.validate = function(token) {
-        return this.mongo.validateToken(token);
-    };
+    this.validate = function(req, res, next) {
+        var token = req.query.token;
+        if (!token) {
+            res.status(400).json("Authentication failure, missing token");
+        } else {
+            this.mongo.validateToken(token).then(function(userid) {
+                req.query.user = userid;
+                next();
+            }).catch(function(error) {
+                res.status(401).json("Authentication failure");
+            })
+        }
+    }.bind(this);
 
     /**
      * Creates a user in our system.
