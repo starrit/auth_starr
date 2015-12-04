@@ -15,7 +15,9 @@ var AuthService =  function(logger) {
 
     /**
      * Checks token to ensure that request is valid.
-     * @param token to be validated.
+     * @param req request object.
+     * @param res response object.
+     * @param next to be called on completion.
      *
      * Checks the user_tokens collection to ensure token is valid.
      */
@@ -24,8 +26,8 @@ var AuthService =  function(logger) {
         if (!token) {
             res.status(400).json("Authentication failure, missing token");
         } else {
-            this.mongo.validateToken(token).then(function(userid) {
-                req.query.user = userid;
+            this.mongo.validateToken(token).then(function(user) {
+                req.user = user;
                 next();
             }).catch(function(error) {
                 res.status(401).json("Authentication failure");
@@ -37,8 +39,6 @@ var AuthService =  function(logger) {
      * Creates a user in our system.
      * @param user unique username of base product user.
      * @param password password of base product user.
-     *
-     * Creates an entry in our users collection.
      */
     this.registerUser = function(user, password) {
         return this.mongo.createUser(user, password);
@@ -46,19 +46,19 @@ var AuthService =  function(logger) {
 
     /**
      * Registers a client.
-     * @param id id of client.
+     * @param name name of client.
      * @param secret secret of client.
      * @returns {*}
      */
-    this.registerClient = function(id, secret) {
-        return this.mongo.createClient(id, secret);
+    this.registerClient = function(name, secret) {
+        return this.mongo.createClient(name, secret);
     };
 
     /**
      * Authenticates Client for registered User.
-     * @param user username of base product user.
+     * @param username username of base product user.
      * @param password of base product user.
-     * @param client_id id of Client requesting access.
+     * @param client_name name of Client requesting access.
      * @param client_secret of Client requesting access.
      *
      * Verifies client id/secret in our client collection.
@@ -66,15 +66,24 @@ var AuthService =  function(logger) {
      *
      * Creates an entry in our tokens collection.
      *  {
-     *      user:<user>,
-     *      client:<client>,
+     *      userid:<user>,
+     *      clientid:<client>,
      *      token:<token>
      *  }
      */
-    this.authenticateClient = function(user, password, client_id, client_secret) {
-        return this.mongo.validateUser(user, password)
-            .then(function() {return this.mongo.validateClient(client_id, client_secret)}.bind(this))
-            .then(function() {return this.mongo.addToken(user, client_id, this.createToken())}.bind(this))
+    this.authenticateClient = function(username, password, client_name, client_secret) {
+        var deferred = Promise.pending();
+        this.mongo.validateUser(username, password)
+            .then(function(user) {
+                this.mongo.validateClient(client_name, client_secret).then(function (client) {
+                    this.mongo.addToken(user.userid, client.clientid, this.createToken()).then(function(token) {
+                        deferred.resolve(token);
+                    });
+                }.bind(this))
+            }.bind(this)).catch(function(error) {
+                deferred.reject(error);
+            });
+        return deferred.promise;
     };
 
     /**
@@ -88,14 +97,24 @@ var AuthService =  function(logger) {
     };
 
     /**
+     * Validate client for base application.
+     * @param client_name name of client.
+     * @param client_password password of client.
+     * @returns {context.promise|*|promise|promiseAndHandler.promise|PromiseArray.promise|Disposer.promise}
+     */
+    this.validateClient = function(client_name, client_password) {
+        return this.mongo.validateClient(client_name, client_password);
+    };
+
+    /**
      * Returns token for client - only occurs if token already exists in datastore,
      * meaning user has authenticated client for use.
-     * @param user base application username.
-     * @param client client requesting token.
+     * @param userid base application username.
+     * @param clientid client requesting token.
      */
-    this.getToken = function(user, client) {
-        return this.mongo.getToken(user, client);
-    }
+    this.getToken = function(userid, clientid) {
+        return this.mongo.getToken(userid, clientid);
+    };
 
 
     /**
