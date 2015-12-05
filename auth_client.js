@@ -39,6 +39,7 @@ var AuthClient =  function(logger, server) {
                 }.bind(this));
                 return Promise.all(rolePromises);
             }.bind(this)).then(function() {
+                //finally, return user object complete with linked role accounts.
                 return self.user;
             }).catch(function(err) {
                 return Promise.reject(err);
@@ -50,7 +51,7 @@ var AuthClient =  function(logger, server) {
      * @param username unique username of base product user.
      * @param password password of base product user.
      *
-     * Validates user name/password in client_users and returns user object containing userid, username, token.
+     * Validates user name/password in client_users and returns user object containing userid, username, token, and role.
      */
     this.login = function(username, password) {
         var deferred = Promise.pending();

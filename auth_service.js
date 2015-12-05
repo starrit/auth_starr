@@ -69,7 +69,7 @@ var AuthService =  function(logger) {
      * @param roles list of roles users should be created for.
      */
     this.registerUser = function(user, password, roles) {
-        return this.mongo.createUsers(user, password, roles);
+        return this.mongo.createUser(user, password, roles);
     };
 
     /**
