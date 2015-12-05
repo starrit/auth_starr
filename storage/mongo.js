@@ -1,5 +1,6 @@
 var mongoose = require('mongoose');
 var Schema = mongoose.Schema;
+var ObjectId = Schema.ObjectId;
 var Promise = require('bluebird');
 var bcrypt = require('bcrypt');
 
@@ -13,7 +14,8 @@ var Store = function(logger) {
         var User = new Schema({
             username : String,
             password : String,
-            userid : Number
+            userid : Number,
+            role : String
         });
         var UserModel = this.mongoose.model('User', User);
 
@@ -37,7 +39,8 @@ var Store = function(logger) {
         var Token = new Schema({
             token : String,
             userid : String,
-            clientid : String
+            clientid : String,
+            role : String
         });
         var TokenModel = this.mongoose.model('Token', Token);
 
@@ -45,13 +48,17 @@ var Store = function(logger) {
          * Creates a user based on username, password.
          * @param username username to create.
          * @param password password to create.
+         * @param roles, one user account to be created for each role.
          * @return new user object.
          */
-        this.createUser = function(username, password) {
+        this.createUsers = function(username, password, roles) {
             var deferred = Promise.pending();
             var newUser =  new UserModel();
+            //create base client user object.
+            newUser.role = 'client';
             newUser.username = username;
             newUser.password = bcrypt.hashSync(password, 10);
+            //make sure that this username doesn't exist already
             UserModel.find({username:username}, function(err, docs) {
                 if (err) {
                     deferred.reject("error checking for existing user");
@@ -59,16 +66,21 @@ var Store = function(logger) {
                     if (docs.length > 0) {
                         deferred.reject("Username already in use");
                     } else {
+                        //get next valid user id for user account.
                         this.getNextUserId().then(function(highest) {
                             newUser.userid = highest;
-                            newUser.save(function(err, success) {
+                            newUser.save(function(err) {
                                 if (err) {
                                     deferred.reject("Error creating user " + err);
                                 } else {
-                                    deferred.resolve(newUser);
+                                    newUser.password = password;
+                                    //strip any mongo fields from user object
+                                    var userObject = this.generateUserObject(newUser, true);
+                                    //add our accounts field including our role accounts to the user object.
+                                    deferred.resolve(this.createAccountRoles(userObject, roles, highest, username));
                                 }
-                            });
-                        }).catch(function(error) {
+                            }.bind(this));
+                        }.bind(this)).catch(function(error) {
                             deferred.resolve("Error calculating user id: " + error);
                         });
                     }
@@ -76,6 +88,69 @@ var Store = function(logger) {
 
             }.bind(this));
 
+            return deferred.promise;
+        };
+
+        /**
+         * Creates list of user account objects to return on user creation.
+         * @param user user object that is basis of account.
+         * @param roles roles, one account is created for each.
+         * @param userid userid of base account.
+         * @param username username of base account.
+         * @returns {*}
+         */
+        this.createAccountRoles = function(user, roles, userid, username) {
+            var deferred = Promise.pending();
+            var rolesList = [];
+            var rolesPromises = [];
+            roles.map(function(role) {
+                rolesPromises.push(this.createRole(role, userid, username));
+            }.bind(this));
+            Promise.all(rolesPromises).then(function(role_users) {
+                role_users.map(function(role_user) {
+                    rolesList.push(role_user);
+                });
+                user.accounts = rolesList;
+                deferred.resolve(user);
+            }.bind(this));
+            return deferred.promise;
+        };
+
+        /**
+         * Creates a role account for the given role.
+         * @param role the role being created.
+         * @param id id of the account that the role is being created for.
+         * @param username username of the base account that the role is being created for.
+         * @returns {*|promise}
+         */
+        this.createRole = function(role, id, username) {
+            var deferred = Promise.pending();
+            var newUser =  new UserModel();
+            newUser.role = role;
+            newUser.username = this.generateRoleUsername(username, role);
+            var password = this.generateRandomPassword();
+            newUser.password = bcrypt.hashSync(password, 10);
+            UserModel.find({username:newUser.username}, function(err, docs) {
+                if (err) {
+                    deferred.reject("error checking for existing user");
+                } else {
+                    if (docs.length > 0) {
+                        deferred.reject("Username already in use");
+                    } else {
+                        newUser.userid = id;
+                        newUser.save(function(err, success) {
+                            if (err) {
+                                deferred.reject("Error creating user " + err);
+                            } else {
+                                //send back unencrypted role password first time.
+                                newUser.password = password;
+                                deferred.resolve(this.generateUserObject(newUser, true));
+                            }
+                        }.bind(this));
+                    }
+                }
+
+            }.bind(this));
             return deferred.promise;
         };
 
@@ -151,7 +226,7 @@ var Store = function(logger) {
 
         /**
          * Creates a client.
-         * @param name name of client.
+         * @param id id of client.
          * @param secret secret of client.
          */
         this.createClient = function(name, secret) {
@@ -202,10 +277,12 @@ var Store = function(logger) {
                     deferred.reject("No token found");
                 } else {
                     var userid = docs[0].userid;
+                    var role = docs[0].role;
                     var token = docs[0].token;
                     deferred.resolve({
                         userid : userid,
-                        token : token
+                        token : token,
+                        role : role
                     });
                 }
             });
@@ -217,9 +294,9 @@ var Store = function(logger) {
          * @param userid user in question.
          * @param clientid id of client in question.
          */
-        this.getToken = function(userid, clientid) {
+        this.getToken = function(userid, clientid, role) {
             var deferred = Promise.pending();
-            TokenModel.find({userid : userid, clientid: clientid}, function (err, docs) {
+            TokenModel.find({userid : userid, clientid: clientid, role: role}, function (err, docs) {
                 if (docs.length == 0) {
                     deferred.reject("No token found");
                 } else {
@@ -233,13 +310,15 @@ var Store = function(logger) {
          * Add a token to our datastore.
          * @param userid user that token is for.
          * @param clientid client that token is for.
+         * @param role identifying role that token is for.
          * @param token token itself.
          */
-        this.addToken = function(userid, clientid, token) {
+        this.addToken = function(userid, clientid, role, token) {
             var deferred = Promise.pending();
             var newToken = new TokenModel();
             newToken.token = token;
             newToken.userid = userid;
+            newToken.role = role;
             newToken.clientid = clientid;
             newToken.save(function(err, success) {
                 if (err) {
@@ -250,6 +329,44 @@ var Store = function(logger) {
             });
             return deferred.promise;
         };
+
+        /**
+         * Creates user object by removing object ids and optionally password.
+         * @param obj obj to create user object out of.
+         * @param includePassword boolean indicating whether to include password in response.
+         */
+        this.generateUserObject = function(obj, includePassword) {
+            var userObj = {
+                userid : obj.userid,
+                username : obj.username,
+                role : obj.role
+            };
+            if (includePassword) {
+                userObj.password = obj.password;
+            };
+            return userObj
+        };
+
+        /**
+         * Generates
+         * @param username
+         * @returns {string}
+         */
+        this.generateRoleUsername = function(username, role) {
+            //TODO figure out the actual structure of returned response that we need.
+            if (username.indexOf('@') != -1) {
+                username = username.substring(0, username.indexOf('@'));
+            }
+            return username + '_' + role;
+        };
+
+        /**
+         * Generates random 5 character user password.
+         */
+        this.generateRandomPassword = function() {
+            return Math.random().toString(36).substr(2, 7);
+        };
+
     }.bind(this));
 };
 

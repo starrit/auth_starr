@@ -17,16 +17,32 @@ var AuthClient =  function(logger, server) {
      * Registers a user with our base client and authenticates it.
      * @param username username of user to be created.
      * @param password password of user.
+     * @param roles list of roles, one user account to be created for each.
      */
-    this.registerUser = function(username, password) {
-        return this.server.registerUser(username, password)
+    this.registerUser = function(username, password, roles) {
+        var self = this;
+        //first, register user and create base account, in addition to any role accounts that should be created.
+        return this.server.registerUser(username, password, roles)
             .then(function(user) {
-                return this.server.authenticateClient(username, password, this.CLIENT_NAME, this.CLIENT_SECRET)
-                    .then(function(token) {
-                        return this.createUserResponse(user, token);
-                    }.bind(this))
-
-            }.bind(this));
+                self.user = user;
+                //then, authenticate this base application with the base account.
+                return this.server.authenticateClient(user.username,
+                    user.password, this.CLIENT_NAME, this.CLIENT_SECRET)
+            }.bind(this)).then(function(token) {
+                self.user.token = token;
+                var roles = self.user.accounts;
+                var rolePromises = [];
+                //next, authenticate the base application with any role accounts.
+                roles.map(function(role) {
+                    rolePromises.push(this.server.authenticateClient(role.username,
+                        role.password, this.CLIENT_NAME, this.CLIENT_SECRET))
+                }.bind(this));
+                return Promise.all(rolePromises);
+            }.bind(this)).then(function() {
+                return self.user;
+            }).catch(function(err) {
+                return Promise.reject(err);
+            });
     };
 
     /**
@@ -42,7 +58,7 @@ var AuthClient =  function(logger, server) {
             .then(function(user) {
                 this.server.validateClient(this.CLIENT_NAME, this.CLIENT_SECRET)
                     .then(function(client) {
-                        this.server.getToken(user.userid, client.clientid).then(function(token) {
+                        this.server.getToken(user.userid, client.clientid, user.role).then(function(token) {
                             deferred.resolve(this.createUserResponse(user, token));
                         }.bind(this));
                     }.bind(this));
@@ -62,7 +78,8 @@ var AuthClient =  function(logger, server) {
         return {
             userid : user.userid,
             username : user.username,
-            token : token
+            token : token,
+            role : user.role
         }
     }
 

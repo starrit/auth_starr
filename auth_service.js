@@ -14,7 +14,34 @@ var AuthService =  function(logger) {
     this.mongo = new storage(logger);
 
     /**
-     * Checks token to ensure that request is valid.
+     * Returns a function that can serve as a middleware component, validating not
+     * only that an auth token is valid but that it has one of the roles defined by
+     * an input list of predefined roles.
+     *
+     */
+    this.validateRole = function(roles) {
+        return function(req, res, next) {
+            var token = req.query.token;
+            if (!token) {
+                res.status(400).json("Authentication failure, missing token");
+            } else {
+                this.mongo.validateToken(token).then(function(user) {
+                    var userRole = user.role;
+                    if (roles.indexOf(userRole) == -1) {
+                        res.status(403).json("User not authorized to access this endpoint");
+                    } else {
+                        req.user = user;
+                        next();
+                    }
+                }).catch(function() {
+                    res.status(401).json("Authentication failure");
+                })
+            }
+        }.bind(this);
+    };
+
+    /**
+     * Checks token to ensure that request is valid, only checking that a user exists for given token.
      * @param req request object.
      * @param res response object.
      * @param next to be called on completion.
@@ -29,9 +56,9 @@ var AuthService =  function(logger) {
             this.mongo.validateToken(token).then(function(user) {
                 req.user = user;
                 next();
-            }).catch(function(error) {
+            }).catch(function() {
                 res.status(401).json("Authentication failure");
-            })
+            });
         }
     }.bind(this);
 
@@ -39,9 +66,10 @@ var AuthService =  function(logger) {
      * Creates a user in our system.
      * @param user unique username of base product user.
      * @param password password of base product user.
+     * @param roles list of roles users should be created for.
      */
-    this.registerUser = function(user, password) {
-        return this.mongo.createUser(user, password);
+    this.registerUser = function(user, password, roles) {
+        return this.mongo.createUsers(user, password, roles);
     };
 
     /**
@@ -56,6 +84,7 @@ var AuthService =  function(logger) {
 
     /**
      * Authenticates Client for registered User.
+     * Creates token for each role associated with this user.
      * @param username username of base product user.
      * @param password of base product user.
      * @param client_name name of Client requesting access.
@@ -70,13 +99,14 @@ var AuthService =  function(logger) {
      *      clientid:<client>,
      *      token:<token>
      *  }
+     *  @return the token that was created.
      */
     this.authenticateClient = function(username, password, client_name, client_secret) {
         var deferred = Promise.pending();
         this.mongo.validateUser(username, password)
             .then(function(user) {
                 this.mongo.validateClient(client_name, client_secret).then(function (client) {
-                    this.mongo.addToken(user.userid, client.clientid, this.createToken()).then(function(token) {
+                    this.mongo.addToken(user.userid, client.clientid, user.role, this.createToken()).then(function(token) {
                         deferred.resolve(token);
                     });
                 }.bind(this))
@@ -111,9 +141,10 @@ var AuthService =  function(logger) {
      * meaning user has authenticated client for use.
      * @param userid base application username.
      * @param clientid client requesting token.
+     * @param role the role of the account requesting access.
      */
-    this.getToken = function(userid, clientid) {
-        return this.mongo.getToken(userid, clientid);
+    this.getToken = function(userid, clientid, role) {
+        return this.mongo.getToken(userid, clientid, role);
     };
 
 
