@@ -41,7 +41,7 @@ var AuthService =  function(logger) {
     };
 
     /**
-     * Checks token to ensure that request is valid, only checking that a user exists for given token.
+     * Middleware that checks token to ensure that request is valid, only checking that a user exists for given token.
      * @param req request object.
      * @param res response object.
      * @param next to be called on completion.
@@ -61,6 +61,26 @@ var AuthService =  function(logger) {
             });
         }
     }.bind(this);
+
+    /**
+     * Direct method call that checks token to ensure that request is valid, only checking that a user exists for given token.
+     * @param token to validate.
+     *
+     * Checks the user_tokens collection to ensure token is valid and returns a Promise object.
+     */
+    this.validateToken = function(token) {
+        var deferred = Promise.pending();
+        if (!token) {
+            deferred.reject("Unable to find token to validate");
+        } else {
+            this.mongo.validateToken(token).then(function(user) {
+                deferred.resolve(user);
+            }).catch(function() {
+                deferred.reject("Invalid user");
+            });
+        }
+        return deferred.promise;
+    };
 
     /**
      * Creates a user in our system.
